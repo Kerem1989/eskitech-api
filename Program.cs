@@ -19,7 +19,7 @@ static async Task<string> GetVismaTokenAsync(HttpClient http, string clientId, s
         ["scope"] = "ea:api"
     };
     using var req = new HttpRequestMessage(HttpMethod.Post,
-        """https://identityeaccounting.test.vismaonline.com/connect/token""")
+        """https://identity.sandbox.vismaonline.com/connect/token""")
     {
         Content = new FormUrlEncodedContent(body)
     };
