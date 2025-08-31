@@ -7,6 +7,8 @@ var app = builder.Build();
 var csvUrl = builder.Configuration["Sheet:CsvUrl"]!;
 var http = new HttpClient();
 List<Product> products = new();
+DateTimeOffset lastReload = DateTimeOffset.UtcNow;
+
 
 static List<Product> ParseCsv(string csv)
 {
@@ -31,6 +33,7 @@ async Task ReloadAsync()
 {
     var csv = await http.GetStringAsync(csvUrl);
     products = ParseCsv(csv);
+    lastReload = DateTimeOffset.UtcNow;
 }
 
 await ReloadAsync();
@@ -56,6 +59,13 @@ app.MapPost("/products/admin/reload", async () =>
 
 });
 
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "ok",
+    products = products.Count,
+    lastReload
+}));
+
 var periodicTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
 _ = Task.Run(async () =>
 {
@@ -65,5 +75,7 @@ _ = Task.Run(async () =>
         catch { /* håll det minimalt: ignorera fel i PoC */ }
     }
 });
+
+
 
 app.Run();
