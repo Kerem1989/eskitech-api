@@ -9,6 +9,58 @@ var http = new HttpClient();
 List<Product> products = new();
 DateTimeOffset lastReload = DateTimeOffset.UtcNow;
 
+static async Task<string> GetVismaTokenAsync(HttpClient http, string clientId, string clientSecret)
+{
+    var body = new Dictionary<string, string>
+    {
+        ["client_id"] = clientId,
+        ["client_secret"] = clientSecret,
+        ["grant_type"] = "client_credentials",
+        ["scope"] = "ea:api"
+    };
+    using var req = new HttpRequestMessage(HttpMethod.Post,
+        "https://identity-sandbox.test.vismaonline.com/connect/token")
+    {
+        Content = new FormUrlEncodedContent(body)
+    };
+
+    using var resp = await http.SendAsync(req);
+    resp.EnsureSuccessStatusCode();
+    var json = await resp.Content.ReadAsStringAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(json);
+    return doc.RootElement.GetProperty("access_token").GetString()!;
+}
+
+// Lägg denna HELPER överst i Program.cs (t.ex. direkt efter GetVismaTokenAsync)
+static async Task CreateVismaArticleAsync(
+    HttpClient http, string baseUrl, string token,
+    string name, string articleNumber, decimal? unitPrice = null)
+{
+    using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/articles");
+    req.Headers.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+    // Minsta möjliga payload för sandbox.
+    var body = new Dictionary<string, object?>
+    {
+        ["name"] = name,
+        ["articleNumber"] = articleNumber,
+        ["unitPrice"] = unitPrice  // kan tas bort om din tenant kräver annat
+    };
+
+    req.Content = new StringContent(
+        System.Text.Json.JsonSerializer.Serialize(body),
+        System.Text.Encoding.UTF8,
+        "application/json");
+
+    using var resp = await http.SendAsync(req);
+    if (!resp.IsSuccessStatusCode)
+    {
+        var txt = await resp.Content.ReadAsStringAsync();
+        throw new InvalidOperationException($"POST /articles failed: {(int)resp.StatusCode} {txt}");
+    }
+}
+
 
 static List<Product> ParseCsv(string csv)
 {
@@ -103,28 +155,6 @@ _ = Task.Run(async () =>
         catch {}
     }
 });
-
-static async Task<string> GetVismaTokenAsync(HttpClient http, string clientId, string clientSecret)
-{
-    var body = new Dictionary<string, string>
-    {
-        ["client_id"] = clientId,
-        ["client_secret"] = clientSecret,
-        ["grant_type"] = "client_credentials",
-        ["scope"] = "ea:api"
-    };
-    using var req = new HttpRequestMessage(HttpMethod.Post,
-        "https://identity-sandbox.test.vismaonline.com/connect/token")
-    {
-        Content = new FormUrlEncodedContent(body)
-    };
-
-    using var resp = await http.SendAsync(req);
-    resp.EnsureSuccessStatusCode();
-    var json = await resp.Content.ReadAsStringAsync();
-    using var doc = System.Text.Json.JsonDocument.Parse(json);
-    return doc.RootElement.GetProperty("access_token").GetString()!;
-}
 
 
 
