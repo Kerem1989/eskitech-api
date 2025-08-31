@@ -66,15 +66,65 @@ app.MapGet("/health", () => Results.Ok(new
     lastReload
 }));
 
+app.MapPost("/products/admin/push-to-visma", async () =>
+{
+    var baseUrl = Environment.GetEnvironmentVariable("VISMA_BASE_URL");
+    var clientId = Environment.GetEnvironmentVariable("VISMA_CLIENT_ID");
+    var clientSecret = Environment.GetEnvironmentVariable("VISMA_CLIENT_SECRET");
+    if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+        return Results.BadRequest(new { error = "Missing VISMA_BASE_URL / VISMA_CLIENT_ID / VISMA_CLIENT_SECRET" });
+
+    var token = await GetVismaTokenAsync(http, clientId, clientSecret);
+
+    int ok = 0, fail = 0;
+    foreach (var p in products)
+    {
+        try
+        {
+            await CreateVismaArticleAsync(http, baseUrl, token, p.Name, p.Sku, p.Price);
+            ok++;
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Push failed for SKU {Sku}", p.Sku);
+            fail++;
+        }
+    }
+    lastReload = DateTimeOffset.UtcNow;
+    return Results.Ok(new { status = "done", created = ok, failed = fail });
+});
+
 var periodicTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
 _ = Task.Run(async () =>
 {
     while (await periodicTimer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping))
     {
         try { await ReloadAsync(); }
-        catch { /* håll det minimalt: ignorera fel i PoC */ }
+        catch {}
     }
 });
+
+static async Task<string> GetVismaTokenAsync(HttpClient http, string clientId, string clientSecret)
+{
+    var body = new Dictionary<string, string>
+    {
+        ["client_id"] = clientId,
+        ["client_secret"] = clientSecret,
+        ["grant_type"] = "client_credentials",
+        ["scope"] = "ea:api"
+    };
+    using var req = new HttpRequestMessage(HttpMethod.Post,
+        "https://identity-sandbox.test.vismaonline.com/connect/token")
+    {
+        Content = new FormUrlEncodedContent(body)
+    };
+
+    using var resp = await http.SendAsync(req);
+    resp.EnsureSuccessStatusCode();
+    var json = await resp.Content.ReadAsStringAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(json);
+    return doc.RootElement.GetProperty("access_token").GetString()!;
+}
 
 
 
