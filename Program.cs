@@ -9,59 +9,6 @@ var http = new HttpClient();
 List<Product> products = new();
 DateTimeOffset lastReload = DateTimeOffset.UtcNow;
 
-static async Task<string> GetVismaTokenAsync(HttpClient http, string clientId, string clientSecret)
-{
-    var body = new Dictionary<string, string>
-    {
-        ["client_id"] = clientId,
-        ["client_secret"] = clientSecret,
-        ["grant_type"] = "client_credentials",
-        ["scope"] = "ea:api"
-    };
-    using var req = new HttpRequestMessage(HttpMethod.Post,
-        """https://identity.sandbox.vismaonline.com/connect/token""")
-    {
-        Content = new FormUrlEncodedContent(body)
-    };
-
-    using var resp = await http.SendAsync(req);
-    resp.EnsureSuccessStatusCode();
-    var json = await resp.Content.ReadAsStringAsync();
-    using var doc = System.Text.Json.JsonDocument.Parse(json);
-    return doc.RootElement.GetProperty("access_token").GetString()!;
-}
-
-// Lägg denna HELPER överst i Program.cs (t.ex. direkt efter GetVismaTokenAsync)
-static async Task CreateVismaArticleAsync(
-    HttpClient http, string baseUrl, string token,
-    string name, string articleNumber, decimal? unitPrice = null)
-{
-    using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/articles");
-    req.Headers.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-    // Minsta möjliga payload för sandbox.
-    var body = new Dictionary<string, object?>
-    {
-        ["name"] = name,
-        ["articleNumber"] = articleNumber,
-        ["unitPrice"] = unitPrice  // kan tas bort om din tenant kräver annat
-    };
-
-    req.Content = new StringContent(
-        System.Text.Json.JsonSerializer.Serialize(body),
-        System.Text.Encoding.UTF8,
-        "application/json");
-
-    using var resp = await http.SendAsync(req);
-    if (!resp.IsSuccessStatusCode)
-    {
-        var txt = await resp.Content.ReadAsStringAsync();
-        throw new InvalidOperationException($"POST /articles failed: {(int)resp.StatusCode} {txt}");
-    }
-}
-
-
 static List<Product> ParseCsv(string csv)
 {
     var lines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -118,34 +65,6 @@ app.MapGet("/health", () => Results.Ok(new
     lastReload
 }));
 
-app.MapPost("/products/admin/push-to-visma", async () =>
-{
-    var baseUrl = Environment.GetEnvironmentVariable("VISMA_BASE_URL");
-    var clientId = Environment.GetEnvironmentVariable("VISMA_CLIENT_ID");
-    var clientSecret = Environment.GetEnvironmentVariable("VISMA_CLIENT_SECRET");
-    if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
-        return Results.BadRequest(new { error = "Missing VISMA_BASE_URL / VISMA_CLIENT_ID / VISMA_CLIENT_SECRET" });
-
-    var token = await GetVismaTokenAsync(http, clientId, clientSecret);
-
-    int ok = 0, fail = 0;
-    foreach (var p in products)
-    {
-        try
-        {
-            await CreateVismaArticleAsync(http, baseUrl, token, p.Name, p.Sku, p.Price);
-            ok++;
-        }
-        catch (Exception ex)
-        {
-            app.Logger.LogWarning(ex, "Push failed for SKU {Sku}", p.Sku);
-            fail++;
-        }
-    }
-    lastReload = DateTimeOffset.UtcNow;
-    return Results.Ok(new { status = "done", created = ok, failed = fail });
-});
-
 var periodicTimer = new PeriodicTimer(TimeSpan.FromSeconds(5));
 _ = Task.Run(async () =>
 {
@@ -155,7 +74,5 @@ _ = Task.Run(async () =>
         catch {}
     }
 });
-
-
 
 app.Run();
